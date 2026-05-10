@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Groove Metronome - Fixed Ticks</title>
+    <style>
+        :root {
+            --bg-color: #1a1a2e;
+            --card-bg: #16213e;
+            --accent: #00d2ff;
+            --text: #ffffff;
+        }
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background-color: var(--card-bg);
+            padding: 2rem;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            width: 380px;
+            text-align: center;
+        }
+        h1 { font-size: 1.1rem; margin-bottom: 1.5rem; color: var(--accent); letter-spacing: 2px; }
+        
+        .indicators {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 1.5rem;
+        }
+        .dot {
+            width: 70px;
+            height: 10px;
+            background-color: #0f3460;
+            border-radius: 5px;
+            transition: 0.05s;
+        }
+        .dot.active { background-color: var(--accent); box-shadow: 0 0 15px var(--accent); }
+
+        .bpm-display { font-size: 3.5rem; font-weight: bold; margin: 0.5rem 0; color: #fff; }
+        
+        .control-group { margin-bottom: 1.8rem; text-align: left; position: relative; }
+        label { display: block; font-size: 0.85rem; margin-bottom: 1.6rem; font-weight: bold; } /* 目盛りとの間隔を少し広げた */
+        
+        /* 目盛り用のCSSを修正 */
+        .ticks-container {
+            position: absolute;
+            width: calc(100% - 10px); /* スライダーのつまみの半径分（約5px×2）を引いて調整 */
+            left: 5px; /* つまみの中心に合わせる */
+            top: 1.6rem;
+            height: 1rem;
+            pointer-events: none;
+        }
+
+        .tick {
+            position: absolute;
+            transform: translateX(-50%); /* 文字の中心を目盛りの位置に合わせる */
+            font-size: 0.7rem;
+            color: var(--accent);
+            white-space: nowrap;
+        }
+
+        .val-label { float: right; color: var(--accent); }
+
+        input[type="range"] { 
+            width: 100%; 
+            margin: 0;
+            cursor: pointer; 
+            accent-color: var(--accent); 
+        }
+        
+        select {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            background: #0f3460;
+            color: white;
+            border: 1px solid var(--accent);
+            cursor: pointer;
+        }
+
+        button {
+            width: 100%;
+            padding: 1.2rem;
+            font-size: 1.3rem;
+            font-weight: bold;
+            background-color: var(--accent);
+            border: none;
+            border-radius: 12px;
+            color: #1a1a2e;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        button:active { transform: scale(0.96); }
+        .vol-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>GROOVE METRONOME</h1>
+    
+    <div class="indicators">
+        <div id="dot-0" class="dot"></div>
+        <div id="dot-1" class="dot"></div>
+        <div id="dot-2" class="dot"></div>
+        <div id="dot-3" class="dot"></div>
+    </div>
+
+    <div class="bpm-display"><span id="bpmValue">120</span></div>
+    <div class="control-group">
+        <input type="range" id="bpm" min="40" max="240" value="120">
+    </div>
+
+    <div class="control-group">
+        <label>Subdivision (連符切り替え)</label>
+        <select id="subdivision">
+            <option value="1">1 (4分音符)</option>
+            <option value="2" selected>2 (8分/Jazz/Funk)</option>
+            <option value="3">3 (3連符)</option>
+            <option value="4">4 (16分音符/Funk Shuffle)</option>
+        </select>
+    </div>
+
+    <div class="control-group">
+        <label>Swing Ratio <span id="swingVal" class="val-label">50%</span></label>
+        <!-- 正確な位置に目盛りを配置するための修正 -->
+        <div class="ticks-container">
+            <div class="tick" style="left: 0%;">50%</div>
+            <div class="tick" style="left: 50%;">75%</div>
+            <div class="tick" style="left: 100%;">100%</div>
+        </div>
+        <input type="range" id="swing" min="50" max="100" value="50">
+    </div>
+
+    <div class="vol-grid">
+        <div class="control-group">
+            <label>Main <span id="mainVolVal" class="val-label">80</span></label>
+            <div class="ticks-container">
+                <div class="tick" style="left: 0%;">0</div>
+                <div class="tick" style="left: 100%;">100</div>
+            </div>
+            <input type="range" id="mainVol" min="0" max="100" value="80">
+        </div>
+        <div class="control-group">
+            <label>Sub <span id="subVolVal" class="val-label">40</span></label>
+            <div class="ticks-container">
+                <div class="tick" style="left: 0%;">0</div>
+                <div class="tick" style="left: 100%;">100</div>
+            </div>
+            <input type="range" id="subVol" min="0" max="100" value="40">
+        </div>
+    </div>
+
+    <button id="startStop">START</button>
+</div>
+
+<script>
+    let audioContext = null;
+    let isPlaying = false;
+    let nextNoteTime = 0.0;
+    let currentQuarterNote = 0;
+    let subdivisionStep = 0;
+    let timerID = null;
+
+    function createWoodClick(freq, vol, time) {
+        if (vol <= 0) return;
+        const osc = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, time);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.8, time + 0.04);
+        gain.gain.setValueAtTime(vol, time);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.04);
+        osc.connect(gain);
+        gain.connect(audioContext.destination);
+        osc.start(time);
+        osc.stop(time + 0.05);
+    }
+
+    function nextNote() {
+        const bpm = document.getElementById('bpm').value;
+        const subDiv = parseInt(document.getElementById('subdivision').value);
+        const swing = document.getElementById('swing').value / 100;
+        const secondsPerBeat = 60.0 / bpm;
+        let stepDuration;
+
+        // 100%時の完全無音を防ぐため、わずかな時間を確保
+        const safeSwing = Math.min(swing, 0.99);
+
+        if (subDiv === 2) {
+            stepDuration = (subdivisionStep % 2 === 0) ? secondsPerBeat * safeSwing : secondsPerBeat * (1 - safeSwing);
+        } else if (subDiv === 4) {
+            stepDuration = (subdivisionStep % 2 === 0) ? (secondsPerBeat / 2) * safeSwing : (secondsPerBeat / 2) * (1 - safeSwing);
+        } else {
+            stepDuration = secondsPerBeat / subDiv;
+        }
+
+        nextNoteTime += stepDuration;
+        subdivisionStep++;
+        if (subdivisionStep >= subDiv) {
+            subdivisionStep = 0;
+            currentQuarterNote = (currentQuarterNote + 1) % 4;
+        }
+    }
+
+    function scheduler() {
+        while (nextNoteTime < audioContext.currentTime + 0.1) {
+            const mainVol = document.getElementById('mainVol').value / 100;
+            const subVol = document.getElementById('subVolVal_hidden') / 100; // 裏拍の音量を適切に取得
+
+            // 実際の音量を取得するための修正
+            const currentSubVol = document.getElementById('subVol').value / 100;
+
+            if (subdivisionStep === 0) {
+                const freq = (currentQuarterNote === 0) ? 1200 : 800;
+                createWoodClick(freq, mainVol, nextNoteTime);
+                const beat = currentQuarterNote;
+                window.requestAnimationFrame(() => {
+                    document.querySelectorAll('.dot').forEach(d => d.classList.remove('active'));
+                    const targetDot = document.getElementById(`dot-${beat}`);
+                    if(targetDot) targetDot.classList.add('active');
+                });
+            } else {
+                createWoodClick(400, currentSubVol, nextNoteTime);
+            }
+            nextNote();
+        }
+        timerID = setTimeout(scheduler, 25);
+    }
+
+    const startBtn = document.getElementById('startStop');
+    startBtn.addEventListener('click', function() {
+        if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
+        isPlaying = !isPlaying;
+        if (isPlaying) {
+            if (audioContext.state === 'suspended') audioContext.resume();
+            currentQuarterNote = 0;
+            subdivisionStep = 0;
+            nextNoteTime = audioContext.currentTime + 0.05;
+            this.textContent = 'STOP';
+            this.style.backgroundColor = '#555';
+            this.style.color = '#fff';
+            scheduler();
+        } else {
+            this.textContent = 'START';
+            this.style.backgroundColor = '#00d2ff';
+            this.style.color = '#1a1a2e';
+            clearTimeout(timerID);
+        }
+    });
+
+    // 数値表示の更新
+    document.getElementById('bpm').oninput = function() { document.getElementById('bpmValue').textContent = this.value; };
+    document.getElementById('swing').oninput = function() { document.getElementById('swingVal').textContent = this.value + '%'; };
+    document.getElementById('mainVol').oninput = function() { document.getElementById('mainVolVal').textContent = this.value; };
+    document.getElementById('subVol').oninput = function() { document.getElementById('subVolVal').textContent = this.value; };
+</script>
+</body>
+</html>
